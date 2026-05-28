@@ -1,0 +1,10 @@
+[package]
+name = "check_ebpf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+aya = "0.13"
+aya-obj = "0.2.1"

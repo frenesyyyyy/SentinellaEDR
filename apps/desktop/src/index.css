@@ -1,0 +1,150 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* === Sentinella Global Styles === */
+
+:root {
+  --color-bg: #0a0e17;
+  --color-surface: #111827;
+  --color-card: #1a2332;
+  --color-border: #1e293b;
+  --color-accent: #22d3ee;
+  --color-green: #10b981;
+  --color-red: #ef4444;
+  --color-amber: #f59e0b;
+  --color-text: #e2e8f0;
+  --color-muted: #64748b;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* === Scrollbar Styling === */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted);
+}
+
+/* === Table Animations === */
+@keyframes rowAppear {
+  0% {
+    opacity: 0;
+    transform: translateY(-4px);
+    background-color: rgba(34, 211, 238, 0.08);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    background-color: transparent;
+  }
+}
+
+.event-row-new {
+  animation: rowAppear 0.4s ease-out;
+}
+
+/* === Glow Effects === */
+.glow-accent {
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.15),
+              0 0 40px rgba(34, 211, 238, 0.05);
+}
+
+.glow-green {
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.2),
+              0 0 40px rgba(16, 185, 129, 0.05);
+}
+
+.glow-red {
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.2),
+              0 0 40px rgba(239, 68, 68, 0.05);
+}
+
+/* === Status Indicator Pulse === */
+@keyframes statusPulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.status-pulse {
+  animation: statusPulse 2s ease-in-out infinite;
+}
+
+/* === Grid Background Pattern === */
+.bg-grid {
+  background-image: 
+    linear-gradient(rgba(30, 41, 59, 0.3) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(30, 41, 59, 0.3) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* === MITRE Tactic Badges === */
+.badge {
+  @apply px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap;
+}
+
+.badge-execution {
+  @apply bg-cyan-500/15 text-cyan-400 border border-cyan-500/20;
+}
+
+.badge-discovery {
+  @apply bg-blue-500/15 text-blue-400 border border-blue-500/20;
+}
+
+.badge-persistence {
+  @apply bg-purple-500/15 text-purple-400 border border-purple-500/20;
+}
+
+.badge-credential-access {
+  @apply bg-red-500/15 text-red-400 border border-red-500/20;
+}
+
+.badge-defense-evasion {
+  @apply bg-amber-500/15 text-amber-400 border border-amber-500/20;
+}
+
+.badge-lateral-movement {
+  @apply bg-orange-500/15 text-orange-400 border border-orange-500/20;
+}
+
+.badge-command-and-control {
+  @apply bg-rose-500/15 text-rose-400 border border-rose-500/20;
+}
+
+.badge-default {
+  @apply bg-slate-500/15 text-slate-400 border border-slate-500/20;
+}

@@ -1,0 +1,31 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/sentinella-common",
+    "crates/sentinella-core",
+    "apps/desktop/src-tauri",
+    "xtask", "check_ebpf",
+]
+exclude = [
+    "crates/sentinella-ebpf",
+]
+
+# The eBPF crate is NOT a workspace member — it uses a different target/toolchain
+# and is built separately via xtask.
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Sentinella Contributors"]
+
+[workspace.dependencies]
+sentinella-common = { path = "crates/sentinella-common" }
+sentinella-core = { path = "crates/sentinella-core" }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+log = "0.4"
+env_logger = "0.11"
+chrono = { version = "0.4", features = ["serde"] }

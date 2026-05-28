@@ -1,0 +1,10 @@
+# Cargo configuration for Sentinella workspace
+# The eBPF crate has its own build flow via xtask and does not use this config.
+
+[alias]
+xtask = "run --package xtask --"
+
+[build]
+# Default target for userspace crates (Linux x86_64)
+# Uncomment if cross-compiling from a non-Linux host:
+# target = "x86_64-unknown-linux-gnu"

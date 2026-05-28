@@ -1,0 +1,31 @@
+[package]
+name = "sentinella-ebpf"
+version = "0.1.0"
+edition = "2021"
+description = "eBPF tracepoint program for Sentinella process execution telemetry"
+
+# This crate is NOT part of the workspace — it targets bpfel-unknown-none
+# and uses the nightly toolchain. Built via `cargo xtask build-ebpf`.
+
+[dependencies]
+sentinella-common = { path = "../sentinella-common", default-features = false }
+aya-ebpf = "0.1"
+aya-log-ebpf = "0.1"
+
+[[bin]]
+name = "sentinella-ebpf"
+path = "src/main.rs"
+
+[profile.dev]
+opt-level = 2       # eBPF verifier needs optimized code
+debug = false
+overflow-checks = false
+panic = "abort"
+lto = true
+
+
+[profile.release]
+opt-level = 2
+debug = false
+lto = true
+panic = "abort"

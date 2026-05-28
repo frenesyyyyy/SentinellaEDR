@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nickkadams/tauri-docs/refs/heads/dev/docs/.vitepress/public/schema.json",
+  "identifier": "default",
+  "description": "Default capability for Sentinella",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-open"
+  ]
+}

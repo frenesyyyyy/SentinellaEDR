@@ -1,0 +1,30 @@
+[package]
+name = "sentinella-tauri"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Sentinella Tauri v2 desktop application backend"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+sentinella-common = { workspace = true, features = ["user"] }
+sentinella-core = { workspace = true }
+tauri = { version = "2", features = ["custom-protocol"] }
+tauri-plugin-shell = "2"
+tokio.workspace = true
+chrono = { workspace = true }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+log.workspace = true
+env_logger.workspace = true
+aya = "0.13"
+libc = "0.2"
+
+
+[lib]
+name = "sentinella_tauri_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+path = "src/lib.rs"

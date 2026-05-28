@@ -1,0 +1,18 @@
+[package]
+name = "sentinella-common"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shared event types between eBPF and userspace for Sentinella"
+
+[features]
+default = []
+# Enable "user" feature for userspace-only functionality (serde, Display, etc.)
+user = ["dep:serde"]
+
+[dependencies]
+# serde is only available in userspace builds, not in eBPF (no_std)
+serde = { workspace = true, optional = true }
+
+[lib]
+path = "src/lib.rs"
