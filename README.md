@@ -16,7 +16,7 @@
 
 <br/>
 
-[![Download AppImage](https://img.shields.io/badge/Download-AppImage%20Release%20v1.2.2-brightgreen?style=for-the-badge&logo=linux)](https://github.com/frenesyyyyy/SentinellaEDR/releases/download/v1.2.2/Sentinella_1.2.2_amd64.AppImage)
+[![Download AppImage](https://img.shields.io/badge/Download-AppImage%20Release%20v1.2.2-brightgreen?style=for-the-badge&logo=linux)](https://github.com/frenesyyyyy/SentinellaEDR/releases/download/Linux/Sentinella_1.2.2_amd64.AppImage)
 
 <br/>
 
