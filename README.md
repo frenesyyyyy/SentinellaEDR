@@ -53,6 +53,8 @@
 
 
 ## ✨ Features & Deep Technical Implementation
+<img width="1284" height="222" alt="top" src="https://github.com/user-attachments/assets/362b87ed-0b00-449d-94af-05356e9a5536" />
+<img width="1290" height="836" alt="screen" src="https://github.com/user-attachments/assets/2167b0a3-2dce-420b-a420-4fe3035a25e3" />
 
 Sentinella provides deep kernel-level visibility and active threat containment with minimal host impact. Below is a detailed view of its core capabilities and how they are implemented:
 
