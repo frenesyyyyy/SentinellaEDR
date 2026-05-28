@@ -16,12 +16,28 @@
 
 <br/>
 
+[![Download AppImage](https://img.shields.io/badge/Download-AppImage%20Release%20v1.2.2-brightgreen?style=for-the-badge&logo=linux)](https://github.com/frenesyyyyy/SentinellaEDR/releases/download/v1.2.2/Sentinella_1.2.2_amd64.AppImage)
+
+<br/>
+
 > **Zero-dependency, kernel-native endpoint detection and response.**
 > Sentinella intercepts syscalls at the eBPF layer, maps behaviors to
 > MITRE ATT&CK in real time, and enforces threat policy — all from a
 > single lightweight desktop application.
 
+### 🖥️ Dashboard Preview
+![Sentinella Dashboard catching a reverse shell](dashboard_preview.gif)
+
 </div>
+
+---
+
+## 🛠️ Tech Stack
+
+* **Programming Language:** [Rust](https://www.rust-lang.org/) (handles backend logic, sensor systems, and policy enforcement)
+* **Kernel Probes:** [Aya (eBPF)](https://aya-rs.dev/) (pure Rust toolchain to write and run tracepoint hooks in the Linux kernel space)
+* **Desktop Framework:** [Tauri v2](https://tauri.app/) (lightweight, secure desktop runtime connecting the Rust sensor and frontend UI)
+* **User Interface:** [React](https://react.dev/) & [TypeScript](https://www.typescriptlang.org/) (fluid dark-mode telemetry grid, live stats, and real-time alert highlighting)
 
 ---
 
@@ -29,11 +45,12 @@
 
 * **Current Version:** `v1.2.2`
 * **Compatible OS:** Linux (specifically optimized for **Kali Linux**, **Debian**, and **Ubuntu**)
-* **Kernel Requirements:** Linux Kernel `≥ 5.8` (required for modern BPF ring buffer support)
+* **Kernel Requirements:** Linux Kernel `≥ 5.8` (required for BPF ring buffer support)
 * **Architecture:** `x86_64` (AMD64)
 * **Required Privileges:** Root / Superuser (needed to load and attach eBPF programs to kernel tracepoints)
 
 ---
+
 
 ## ✨ Features & Deep Technical Implementation
 
