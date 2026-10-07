@@ -12,8 +12,7 @@
 pub const COMM_LEN: usize = 16;
 
 /// Maximum length for the filename/path captured from execve.
-/// 256 bytes is a reasonable bound for Phase 1 — full PATH_MAX (4096) would
-/// bloat ring buffer entries.
+/// Bounded to 256 bytes to keep ring-buffer entries small; longer paths truncate.
 pub const FILENAME_LEN: usize = 256;
 
 /// Event types for telemetry classification.

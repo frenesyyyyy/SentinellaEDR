@@ -1,196 +1,20 @@
 //! # Sentinella Desktop — Main Entry Point
 //!
 //! Launches the Tauri v2 application with the Sentinella eBPF sensor backend.
-//! Phase 8: Event Flood Aggregation — debounces benign execve events to protect the UI.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::collections::HashMap;
-use std::sync::Arc;
+mod aggregation;
+mod policy;
+
+use aggregation::{EventAggregator, ProcessEvent, AGGREGATION_WINDOW_MS};
+use policy::{is_benign_memfd, is_noisy_benign, is_restricted_comm, is_restricted_filename};
+
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
-use tauri::{AppHandle, Emitter, State};
-
-/// Process event payload serializable to JSON.
-#[derive(serde::Serialize, Clone, Debug)]
-pub struct ProcessEvent {
-    pub timestamp: String,
-    pub pid: u32,
-    pub process: String,
-    pub event_type: String,
-    pub details: String,
-    pub enforcement: String,
-    /// Number of aggregated duplicate events (None or 1 = single event)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub count: Option<u32>,
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Phase 8 — Event Flood Aggregator
-// Buffers benign (non-threat) events for a short time window and collapses
-// duplicates by command name so the UI never receives an event flood from
-// highly-threaded applications like Firefox or Chrome.
-// ────────────────────────────────────────────────────────────────────────────
-const AGGREGATION_WINDOW_MS: u64 = 250;
-
-/// Key used to group duplicate events in the aggregation window.
-#[derive(Hash, Eq, PartialEq, Clone, Debug)]
-struct AggKey {
-    process: String,
-    event_type: String,
-}
-
-/// Buffered state for a single aggregation key.
-#[derive(Clone, Debug)]
-struct AggBucket {
-    /// The most recent event for this key (used as the representative).
-    representative: ProcessEvent,
-    /// How many raw events have been collapsed into this bucket.
-    count: u32,
-}
-
-/// Thread-safe event aggregator shared between the ring-buffer reader and the
-/// periodic flush task.
-struct EventAggregator {
-    buffer: Mutex<HashMap<AggKey, AggBucket>>,
-}
-
-impl EventAggregator {
-    fn new() -> Self {
-        Self {
-            buffer: Mutex::new(HashMap::new()),
-        }
-    }
-
-    /// Insert a benign event into the aggregation buffer.
-    async fn insert(&self, event: ProcessEvent) {
-        let key = AggKey {
-            process: event.process.clone(),
-            event_type: event.event_type.clone(),
-        };
-        let mut buf = self.buffer.lock().await;
-        let entry = buf.entry(key).or_insert_with(|| AggBucket {
-            representative: event.clone(),
-            count: 0,
-        });
-        entry.count += 1;
-        // Always keep the latest timestamp/pid as the representative
-        entry.representative = event;
-    }
-
-    /// Drain the buffer and return all aggregated events ready for emission.
-    async fn flush(&self) -> Vec<ProcessEvent> {
-        let mut buf = self.buffer.lock().await;
-        let drained: Vec<ProcessEvent> = buf
-            .drain()
-            .map(|(_, bucket)| {
-                let mut ev = bucket.representative;
-                ev.count = if bucket.count > 1 {
-                    Some(bucket.count)
-                } else {
-                    None
-                };
-                ev
-            })
-            .collect();
-        drained
-    }
-}
-
-fn is_restricted_comm(comm: &[u8; 16]) -> bool {
-    let s = sentinella_common::bytes_to_str(comm);
-    matches!(s, "nc" | "ncat" | "netcat" | "socat")
-}
-
-fn is_restricted_filename(filename: &[u8; 256]) -> bool {
-    let s = sentinella_common::bytes_to_str(filename);
-    s == "nc" || s.ends_with("/nc") ||
-    s == "ncat" || s.ends_with("/ncat") ||
-    s == "netcat" || s.ends_with("/netcat") ||
-    s == "socat" || s.ends_with("/socat")
-}
-
-fn is_benign_memfd(comm: &str, name: &str) -> bool {
-    let comm_lower = comm.to_lowercase();
-    if comm_lower.contains("pulse")
-        || comm_lower.contains("pipewire")
-        || comm_lower.contains("chrome")
-        || comm_lower.contains("chromium")
-        || comm_lower.contains("firefox")
-        || comm_lower.contains("gnome")
-        || comm_lower.contains("wayland")
-        || comm_lower.contains("xorg")
-        || comm_lower.contains("dbus")
-        || comm_lower.contains("systemd")
-        || comm_lower.contains("glycin")
-        || comm_lower.contains("gvfs")
-        || comm_lower.contains("gdm")
-        || comm_lower.contains("packagekit")
-        || comm_lower.contains("sudo")
-        || comm_lower.contains("bash")
-        || comm_lower.contains("zsh")
-        || comm_lower.contains("fish")
-    {
-        return true;
-    }
-
-    let name_lower = name.to_lowercase();
-    if name_lower.is_empty()
-        || name_lower.contains("pulse")
-        || name_lower.contains("pipewire")
-        || name_lower.contains("wayland")
-        || name_lower.contains("mesa")
-        || name_lower.contains("glycin")
-        || name_lower.contains("x11")
-        || name_lower.contains("shared")
-        || name_lower.contains("double-buffered")
-        || name_lower.contains("chrome")
-        || name_lower.contains("firefox")
-        || name_lower.contains("colord")
-        || name_lower.contains("gdm")
-        || name_lower.contains("snap")
-        || name_lower.contains("flatpak")
-    {
-        return true;
-    }
-
-    false
-}
-
-fn is_noisy_benign(comm: &str, filename: &str) -> bool {
-    let comm_lower = comm.to_lowercase();
-    let filename_lower = filename.to_lowercase();
-
-    // XFCE and Kali panel widgets / scripts
-    if comm_lower == "wrapper-2.0"
-        || comm_lower.starts_with("xfce4-")
-        || filename_lower.contains("xfce4-panel")
-        || filename_lower.contains("genmon")
-        || filename_lower.contains("vpnip.sh")
-    {
-        return true;
-    }
-
-    // Common background utility execution spams (e.g. from status bar or monitor scripts)
-    if comm_lower == "grep"
-        || comm_lower == "ip"
-        || comm_lower == "cut"
-        || comm_lower == "head"
-        || comm_lower == "cat"
-        || comm_lower == "sed"
-        || comm_lower == "awk"
-        || comm_lower == "tr"
-        || comm_lower == "free"
-        || comm_lower == "df"
-        || comm_lower == "uptime"
-        || comm_lower == "sensors"
-    {
-        return true;
-    }
-
-    false
-}
 
 #[derive(serde::Serialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -213,15 +37,17 @@ pub struct AppState {
     last_error: Mutex<Option<String>>,
     running_flag: Mutex<Option<Arc<AtomicBool>>>,
     task_handle: Mutex<Option<JoinHandle<()>>>,
-    /// Phase 8: Handle for the aggregator flush task
+
     flush_task_handle: Mutex<Option<JoinHandle<()>>>,
 
-    // Phase 6 Additions:
     engine_mode: Arc<tokio::sync::Mutex<EngineMode>>,
     baselines: Arc<tokio::sync::RwLock<std::collections::HashSet<(String, u32)>>>,
-    connection_tracker: Arc<tokio::sync::RwLock<std::collections::HashMap<(String, u32), (Vec<std::time::Instant>, std::time::Instant)>>>,
+    connection_tracker: Arc<
+        tokio::sync::RwLock<
+            std::collections::HashMap<(String, u32), (Vec<std::time::Instant>, std::time::Instant)>,
+        >,
+    >,
 
-    // Phase 9 Additions:
     baselines_path: Arc<tokio::sync::Mutex<Option<std::path::PathBuf>>>,
 }
 
@@ -236,7 +62,9 @@ impl AppState {
 
             engine_mode: Arc::new(tokio::sync::Mutex::new(EngineMode::Learning)),
             baselines: Arc::new(tokio::sync::RwLock::new(std::collections::HashSet::new())),
-            connection_tracker: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            connection_tracker: Arc::new(
+                tokio::sync::RwLock::new(std::collections::HashMap::new()),
+            ),
 
             baselines_path: Arc::new(tokio::sync::Mutex::new(None)),
         }
@@ -254,11 +82,7 @@ fn ip_to_string(ip: u32) -> String {
 }
 
 #[tauri::command]
-async fn start_sensor(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
-    // Check if already running
+async fn start_sensor(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
     {
         let status = state.status.lock().await;
         if *status == SensorStatus::Running {
@@ -266,7 +90,6 @@ async fn start_sensor(
         }
     }
 
-    // Set status to starting
     {
         let mut status = state.status.lock().await;
         *status = SensorStatus::Starting;
@@ -275,7 +98,6 @@ async fn start_sensor(
 
     log::info!("Starting Sentinella sensor...");
 
-    // Load ebpf bytes
     let ebpf_bytes = match load_ebpf_bytes() {
         Ok(bytes) => bytes,
         Err(e) => {
@@ -290,7 +112,6 @@ async fn start_sensor(
         }
     };
 
-    // Load Ebpf program
     let mut ebpf = match aya::Ebpf::load(&ebpf_bytes) {
         Ok(e) => e,
         Err(e) => {
@@ -305,7 +126,6 @@ async fn start_sensor(
         }
     };
 
-    // Phase 8 diagnostic: enumerate all programs found in the eBPF object
     log::info!("eBPF programs found in object:");
     for (name, _prog) in ebpf.programs() {
         log::info!("  program: '{}'", name);
@@ -324,8 +144,10 @@ async fn start_sensor(
     let program: &mut aya::programs::TracePoint = match ebpf
         .program_mut(execve_name)
         .ok_or_else(|| format!("eBPF program '{}' not found", execve_name))
-        .and_then(|p| p.try_into().map_err(|e| format!("Program is not a TracePoint: {}", e)))
-    {
+        .and_then(|p| {
+            p.try_into()
+                .map_err(|e| format!("Program is not a TracePoint: {}", e))
+        }) {
         Ok(p) => p,
         Err(err_msg) => {
             log::error!("{}", err_msg);
@@ -478,10 +300,9 @@ async fn start_sensor(
         return Err(err_msg);
     }
 
-    // Get RingBuf map
     let ring_buf = match aya::maps::RingBuf::try_from(
         ebpf.take_map("EVENTS")
-            .ok_or_else(|| "Map 'EVENTS' not found in eBPF object".to_string())?
+            .ok_or_else(|| "Map 'EVENTS' not found in eBPF object".to_string())?,
     ) {
         Ok(rb) => rb,
         Err(e) => {
@@ -507,11 +328,10 @@ async fn start_sensor(
     let tracker_clone = state.connection_tracker.clone();
     let baselines_path_clone = state.baselines_path.clone();
 
-    // Phase 8: Shared event aggregator for benign event deduplication
     let aggregator = Arc::new(EventAggregator::new());
     let aggregator_flush = aggregator.clone();
 
-    // ── Flush task: drains the aggregator every AGGREGATION_WINDOW_MS ──
+    // Flush on a fixed interval; this is batching, not a per-event debounce.
     let flush_task = tokio::spawn(async move {
         while running_flush.load(Ordering::Relaxed) {
             tokio::time::sleep(std::time::Duration::from_millis(AGGREGATION_WINDOW_MS)).await;
@@ -530,7 +350,6 @@ async fn start_sensor(
         log::info!("Aggregator flush task stopped.");
     });
 
-    // Spawn task to read from ring buffer
     let task = tokio::spawn(async move {
         let _ebpf_keepalive = ebpf; // Keep Ebpf instance loaded so programs don't detach
         let mut async_fd = match tokio::io::unix::AsyncFd::new(ring_buf) {
@@ -574,8 +393,12 @@ async fn start_sensor(
                     if data.len() < std::mem::size_of::<sentinella_common::NetworkEvent>() {
                         continue;
                     }
+                    // SAFETY: The size check covers the fixed-layout integer/byte fields;
+                    // read_unaligned does not assume the ring-buffer slice is aligned.
                     let raw_event: sentinella_common::NetworkEvent = unsafe {
-                        std::ptr::read_unaligned(data.as_ptr() as *const sentinella_common::NetworkEvent)
+                        std::ptr::read_unaligned(
+                            data.as_ptr() as *const sentinella_common::NetworkEvent
+                        )
                     };
 
                     let comm = sentinella_common::bytes_to_str(&raw_event.comm).to_string();
@@ -592,10 +415,10 @@ async fn start_sensor(
                         {
                             let mut baselines_lock = baselines_clone.write().await;
                             if baselines_lock.insert((comm.clone(), dest_ip)) {
-                                // Save to disk
                                 let path_lock = baselines_path_clone.lock().await;
                                 if let Some(ref path) = *path_lock {
-                                    if let Ok(serialized) = serde_json::to_string(&*baselines_lock) {
+                                    if let Ok(serialized) = serde_json::to_string(&*baselines_lock)
+                                    {
                                         let _ = std::fs::write(path, serialized);
                                     }
                                 }
@@ -624,19 +447,23 @@ async fn start_sensor(
 
                         if !is_baselined {
                             let now = std::time::Instant::now();
-                            
-                            // Prune map every 1000 events to prevent memory leakage
-                            static NETWORK_EVENT_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+                            // Remove idle keys periodically; active keys retain at most five timestamps.
+                            static NETWORK_EVENT_COUNT: std::sync::atomic::AtomicU64 =
+                                std::sync::atomic::AtomicU64::new(0);
                             let count = NETWORK_EVENT_COUNT.fetch_add(1, Ordering::Relaxed);
                             if count % 1000 == 0 {
                                 let mut tracker_lock = tracker_clone.write().await;
                                 tracker_lock.retain(|_, (_, last_updated)| {
-                                    now.duration_since(*last_updated) < std::time::Duration::from_secs(300)
+                                    now.duration_since(*last_updated)
+                                        < std::time::Duration::from_secs(300)
                                 });
                             }
 
                             let mut tracker_lock = tracker_clone.write().await;
-                            let entry = tracker_lock.entry((comm.clone(), dest_ip)).or_insert_with(|| (Vec::new(), now));
+                            let entry = tracker_lock
+                                .entry((comm.clone(), dest_ip))
+                                .or_insert_with(|| (Vec::new(), now));
                             entry.1 = now; // update last seen
                             let timestamps = &mut entry.0;
                             timestamps.push(now);
@@ -650,13 +477,15 @@ async fn start_sensor(
                             if timestamps.len() >= 3 {
                                 let mut deltas = Vec::new();
                                 for i in 1..timestamps.len() {
-                                    let delta = timestamps[i].duration_since(timestamps[i-1]).as_secs_f64();
+                                    let delta = timestamps[i]
+                                        .duration_since(timestamps[i - 1])
+                                        .as_secs_f64();
                                     deltas.push(delta);
                                 }
-                                
+
                                 let sum: f64 = deltas.iter().sum();
                                 let avg = sum / deltas.len() as f64;
-                                
+
                                 if avg >= 1.0 {
                                     let mut max_dev = 0.0;
                                     for &d in &deltas {
@@ -674,7 +503,10 @@ async fn start_sensor(
                             }
 
                             let (event_type, enforcement) = if is_beacon {
-                                (format!("C2 Beacon ({:.0}s Heartbeat)", avg_delta_secs), "Flagged (Alert)".to_string())
+                                (
+                                    format!("C2 Beacon ({:.0}s Heartbeat)", avg_delta_secs),
+                                    "Flagged (Alert)".to_string(),
+                                )
                             } else {
                                 ("Network Connect".to_string(), "Observed".to_string())
                             };
@@ -690,10 +522,13 @@ async fn start_sensor(
                                 count: None,
                             };
 
-                            // ── SECURITY EXCEPTION: Beacon/Flagged events bypass aggregation ──
+                            // Emit beacon alerts without waiting for the display batch.
                             if is_beacon {
                                 if let Err(e) = app_clone.emit("sensor-telemetry", &process_event) {
-                                    log::error!("Failed to emit beacon alert over Tauri IPC: {}", e);
+                                    log::error!(
+                                        "Failed to emit beacon alert over Tauri IPC: {}",
+                                        e
+                                    );
                                 }
                             } else {
                                 // Observed network connect — benign, aggregate it
@@ -706,12 +541,17 @@ async fn start_sensor(
                     if data.len() < std::mem::size_of::<sentinella_common::ExecEvent>() {
                         continue;
                     }
+                    // SAFETY: The size check covers the fixed-layout integer/byte fields;
+                    // read_unaligned does not assume the ring-buffer slice is aligned.
                     let raw_event: sentinella_common::ExecEvent = unsafe {
-                        std::ptr::read_unaligned(data.as_ptr() as *const sentinella_common::ExecEvent)
+                        std::ptr::read_unaligned(
+                            data.as_ptr() as *const sentinella_common::ExecEvent
+                        )
                     };
 
                     let event_type_val = raw_event.event_type;
-                    let is_restricted = is_restricted_comm(&raw_event.comm) || is_restricted_filename(&raw_event.filename);
+                    let is_restricted = is_restricted_comm(&raw_event.comm)
+                        || is_restricted_filename(&raw_event.filename);
                     let is_fileless = event_type_val == 2;
 
                     let comm = sentinella_common::bytes_to_str(&raw_event.comm);
@@ -728,9 +568,10 @@ async fn start_sensor(
                     }
 
                     if is_fileless || is_restricted {
-                        // ── SECURITY EXCEPTION: Threat events ALWAYS bypass aggregation ──
+                        // These alerts bypass batching, but still share the ten-per-second limit.
                         let now = std::time::Instant::now();
-                        if now.duration_since(last_alert_time) >= std::time::Duration::from_secs(1) {
+                        if now.duration_since(last_alert_time) >= std::time::Duration::from_secs(1)
+                        {
                             last_alert_time = now;
                             alerts_in_current_second = 0;
                         }
@@ -770,15 +611,15 @@ async fn start_sensor(
                                 count: None,
                             };
 
-                            // Emit IMMEDIATELY — never aggregated
                             if let Err(e) = app_clone.emit("sensor-telemetry", &process_event) {
                                 log::error!("Failed to emit event over Tauri IPC: {}", e);
                             }
                         } else {
-                            log::warn!("Rate-limiting threat alerts: exceeded 10 alerts per second.");
+                            log::warn!(
+                                "Rate-limiting threat alerts: exceeded 10 alerts per second."
+                            );
                         }
                     } else {
-                        // ── BENIGN execve: route through aggregator ──
                         let details = if filename.is_empty() {
                             comm.to_string()
                         } else {
@@ -803,7 +644,9 @@ async fn start_sensor(
             guard.clear_ready();
 
             // Throttle statistics emission to at most once every 500ms to minimize IPC overhead
-            if scanned_count != last_emitted_count && last_stats_emit.elapsed() >= std::time::Duration::from_millis(500) {
+            if scanned_count != last_emitted_count
+                && last_stats_emit.elapsed() >= std::time::Duration::from_millis(500)
+            {
                 if let Err(e) = app_clone.emit("sensor-stats", scanned_count) {
                     log::error!("Failed to emit stats over Tauri IPC: {}", e);
                 }
@@ -842,10 +685,7 @@ async fn start_sensor(
 }
 
 #[tauri::command]
-async fn stop_sensor(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
+async fn stop_sensor(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
     let mut flag_lock = state.running_flag.lock().await;
     if let Some(flag) = flag_lock.take() {
         flag.store(false, Ordering::Relaxed);
@@ -856,7 +696,6 @@ async fn stop_sensor(
         let _ = handle.await;
     }
 
-    // Phase 8: Also stop the aggregator flush task
     let mut flush_lock = state.flush_task_handle.lock().await;
     if let Some(handle) = flush_lock.take() {
         let _ = handle.await;
@@ -871,9 +710,7 @@ async fn stop_sensor(
 }
 
 #[tauri::command]
-async fn sensor_status(
-    state: State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
+async fn sensor_status(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     let status = state.status.lock().await;
     let last_error = state.last_error.lock().await;
 
@@ -884,15 +721,11 @@ async fn sensor_status(
 }
 
 #[tauri::command]
-async fn set_engine_mode(
-    state: State<'_, AppState>,
-    mode: EngineMode,
-) -> Result<(), String> {
+async fn set_engine_mode(state: State<'_, AppState>, mode: EngineMode) -> Result<(), String> {
     let mut current_mode = state.engine_mode.lock().await;
     *current_mode = mode;
     log::info!("Engine mode set to: {:?}", mode);
 
-    // Save engine mode config
     let path_lock = state.baselines_path.lock().await;
     if let Some(ref path) = *path_lock {
         if let Some(parent) = path.parent() {
@@ -912,9 +745,7 @@ async fn set_engine_mode(
 }
 
 #[tauri::command]
-async fn get_engine_mode(
-    state: State<'_, AppState>,
-) -> Result<EngineMode, String> {
+async fn get_engine_mode(state: State<'_, AppState>) -> Result<EngineMode, String> {
     let mode = state.engine_mode.lock().await;
     Ok(*mode)
 }
@@ -935,19 +766,18 @@ fn check_privileges() -> Result<bool, String> {
 /// Helper to load compiled eBPF bytecode.
 fn load_ebpf_bytes() -> Result<Vec<u8>, String> {
     #[cfg(debug_assertions)]
-    const EBPF_BYTES: &[u8] = include_bytes!("../../../../target/bpfel-unknown-none/debug/sentinella-ebpf");
+    const EBPF_BYTES: &[u8] =
+        include_bytes!("../../../../target/bpfel-unknown-none/debug/sentinella-ebpf");
 
     #[cfg(not(debug_assertions))]
-    const EBPF_BYTES: &[u8] = include_bytes!("../../../../target/bpfel-unknown-none/release/sentinella-ebpf");
+    const EBPF_BYTES: &[u8] =
+        include_bytes!("../../../../target/bpfel-unknown-none/release/sentinella-ebpf");
 
     Ok(EBPF_BYTES.to_vec())
 }
 
 fn main() {
-    // Initialize logging
-    env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("info")
-    ).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     log::info!("Starting Sentinella Desktop v{}", env!("CARGO_PKG_VERSION"));
 
@@ -962,7 +792,6 @@ fn main() {
                 let baselines_path = local_data_dir.join("baselines.json");
                 let config_path = local_data_dir.join("config.json");
 
-                // Load baselines
                 if baselines_path.exists() {
                     if let Ok(content) = std::fs::read_to_string(&baselines_path) {
                         if let Ok(loaded) = serde_json::from_str(&content) {
@@ -973,11 +802,12 @@ fn main() {
                     }
                 }
 
-                // Load config
                 if config_path.exists() {
                     if let Ok(content) = std::fs::read_to_string(&config_path) {
                         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
-                            if let Some(mode_str) = parsed.get("engine_mode").and_then(|v| v.as_str()) {
+                            if let Some(mode_str) =
+                                parsed.get("engine_mode").and_then(|v| v.as_str())
+                            {
                                 let mode = match mode_str {
                                     "enforcement" => EngineMode::Enforcement,
                                     _ => EngineMode::Learning,
@@ -990,7 +820,6 @@ fn main() {
                     }
                 }
 
-                // Save path to state
                 let mut path_lock = state.baselines_path.blocking_lock();
                 *path_lock = Some(baselines_path);
             }
@@ -1007,4 +836,3 @@ fn main() {
         .run(tauri::generate_context!())
         .expect("Failed to launch Sentinella Tauri application");
 }
-

@@ -69,4 +69,3 @@ export async function getEngineMode(): Promise<"learning" | "enforcement"> {
 export async function checkPrivileges(): Promise<boolean> {
   return invoke<boolean>("check_privileges");
 }
-

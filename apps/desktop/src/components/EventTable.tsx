@@ -66,7 +66,6 @@ export default function EventTable({ events }: EventTableProps) {
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-cyber-border bg-cyber-surface/50">
         <div className="flex items-center gap-3">
           <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider">
@@ -88,8 +87,6 @@ export default function EventTable({ events }: EventTableProps) {
           )}
         </div>
       </div>
-
-      {/* Table */}
       <div
         ref={tableRef}
         onScroll={handleScroll}

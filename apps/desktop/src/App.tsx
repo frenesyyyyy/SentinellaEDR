@@ -15,7 +15,6 @@ export default function App() {
   const [autoScroll, setAutoScroll] = useState(true);
   const [engineMode, setEngineModeState] = useState<"learning" | "enforcement">("learning");
 
-  // Loading / Splash Screen states
   const [showLoading, setShowLoading] = useState(true);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [loadingStatus, setLoadingStatus] = useState("Initializing EDR systems...");
@@ -32,7 +31,7 @@ export default function App() {
     }
   };
 
-  // Loading simulator & privilege validation
+  // The splash delay is visual; the privilege check determines sensor access.
   useEffect(() => {
     let progress = 0;
     const interval = setInterval(async () => {
@@ -90,7 +89,6 @@ export default function App() {
     }
   }, [events, autoScroll]);
 
-  // Handle scroll detection
   const handleScroll = () => {
     if (!gridBodyRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = gridBodyRef.current;
@@ -98,26 +96,23 @@ export default function App() {
     setAutoScroll(isAtBottom);
   };
 
-  // Listen for backend events, stats, & status changes
   useEffect(() => {
     const unlisteners: (() => void)[] = [];
     const pendingEvents: ProcessEvent[] = [];
 
-    // Listen for ProcessEvent telemetry stream and queue them
     onSensorTelemetry((event) => {
       pendingEvents.push(event);
     }).then((u) => unlisteners.push(u));
 
-    // Listen for total scanned count statistics
     onSensorStats((count) => {
       setScannedCount(count);
     }).then((u) => unlisteners.push(u));
 
-    // Throttling: batch commit pending events every 500ms to eliminate UI thrashing
+    // Batch state updates so each incoming event does not trigger a render.
     const throttleInterval = setInterval(() => {
       if (pendingEvents.length > 0) {
         const chunk = [...pendingEvents];
-        pendingEvents.length = 0; // Clear queue
+        pendingEvents.length = 0;
         
         setEvents((prev) => {
           const next = [...prev, ...chunk];
@@ -126,14 +121,12 @@ export default function App() {
       }
     }, 500);
 
-    // Listen for status changes
     onStatusChange((s) => {
       setStatus(s as SensorStatus);
       if (s === "running") setIsLoading(false);
       if (s === "error") setIsLoading(false);
     }).then((u) => unlisteners.push(u));
 
-    // Fetch initial status on mount
     getSensorStatus().then((res) => {
       setStatus(res.status);
       if (res.error) setError(res.error);
@@ -141,7 +134,6 @@ export default function App() {
       console.error("Failed to fetch initial sensor status", e);
     });
 
-    // Fetch initial engine mode on mount
     getEngineMode().then((mode) => {
       setEngineModeState(mode);
     }).catch((e) => {
@@ -233,7 +225,6 @@ export default function App() {
 
   return (
     <div className="h-screen flex flex-col bg-zinc-950 text-zinc-100 font-sans overflow-hidden select-none">
-      {/* Topbar */}
       <div className="flex items-center justify-between px-6 py-4 bg-zinc-900 border-b border-zinc-800/80 shadow-md">
         <div className="flex items-center gap-4">
           <div className="bg-zinc-950 p-2 rounded border border-zinc-800/60 flex items-center justify-center">
@@ -247,8 +238,6 @@ export default function App() {
               Security Agent & telemetry console
             </span>
           </div>
-
-          {/* status badge */}
           {isRunning && (
             <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-zinc-300 text-[9px] font-semibold tracking-wider font-mono">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]"></span>
@@ -268,10 +257,7 @@ export default function App() {
             </span>
           )}
         </div>
-
-        {/* Topbar Actions */}
         <div className="flex items-center gap-3">
-          {/* Mode Toggle Switch */}
           <div className="flex items-center gap-2.5 bg-zinc-950 px-3 py-1.5 rounded border border-zinc-800 select-none">
             <span className={`text-[10px] font-mono tracking-wider font-semibold transition-colors duration-200
               ${engineMode === "learning" ? "text-cyan-400" : "text-zinc-500"}`}>
@@ -298,8 +284,6 @@ export default function App() {
               ENFORCE
             </span>
           </div>
-
-          {/* Clear Logs Button */}
           <button 
             onClick={clearLogs}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded border border-zinc-800 hover:border-zinc-700 bg-zinc-950 text-zinc-300 hover:text-white transition-all select-none"
@@ -310,8 +294,6 @@ export default function App() {
             </svg>
             Clear Threats
           </button>
-
-          {/* Pause/Resume Sensor Button */}
           <button
             onClick={handleToggleSensor}
             disabled={isStarting || isLoading}
@@ -336,8 +318,6 @@ export default function App() {
           </button>
         </div>
       </div>
-
-      {/* Stats Summary Line (Minimalistic Overview) */}
       <div className="flex items-center justify-between px-6 py-3 bg-zinc-900/60 border-b border-zinc-800/80 select-text">
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-2">
@@ -357,8 +337,6 @@ export default function App() {
           SYSTEM LAYER MONITORS: EXECVE | CONNECT | MEMFD_CREATE
         </div>
       </div>
-
-      {/* Error banner */}
       {error && (
         <div className="px-6 py-2 bg-red-950/15 border-b border-red-900/30">
           <p className="text-xs text-red-400 font-mono select-text font-medium">
@@ -366,8 +344,6 @@ export default function App() {
           </p>
         </div>
       )}
-
-      {/* Telemetry Grid Container */}
       <div 
         ref={gridBodyRef}
         onScroll={handleScroll}
@@ -477,12 +453,8 @@ export default function App() {
             )}
           </tbody>
         </table>
-        
-        {/* End Reference for Autoscroll */}
         <div ref={gridEndRef} />
       </div>
-
-      {/* Footer — Brand Attribution */}
       <div className="flex items-center justify-center px-6 py-1.5 bg-zinc-900/40 border-t border-zinc-800/60">
         <span
           className="text-[10px] tracking-widest uppercase"
@@ -498,4 +470,3 @@ export default function App() {
     </div>
   );
 }
-

@@ -34,11 +34,11 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "copyright": "Copyright © 2026 Sentinella Contributors",
+    "copyright": "Copyright Â© 2026 Sentinella Contributors",
     "license": "MIT",
     "licenseFile": "../../../LICENSE",
     "publisher": "Frenesy",
-    "shortDescription": "Real-time Linux kernel threat telemetry EDR application",
-    "longDescription": "Sentinella is a kernel-native endpoint detection and response dashboard mapping syscall activities to MITRE ATT&CK via eBPF tracepoints."
+    "shortDescription": "Linux runtime security prototype built with Rust and eBPF",
+    "longDescription": "Experimental Linux syscall telemetry, name-based policy and network timing heuristics, with a Tauri and React desktop interface. See KNOWN_LIMITATIONS.md before running."
   }
 }

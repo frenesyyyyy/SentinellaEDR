@@ -9,10 +9,10 @@
 //! 3. Reads the filename pointer from the tracepoint context
 //! 4. Packs a fixed-size `ExecEvent` and submits to ring buffer
 //!
-//! ## Limitations (Phase 1)
+//! ## Capture limits
 //! - No argv capture
-//! - No blocking/enforcement
-//! - PPID is 0 (requires task_struct traversal, deferred to Phase 2)
+//! - The execve probe attempts SIGKILL for restricted names in every UI mode
+//! - PPID is always 0
 
 #![no_std]
 #![no_main]
@@ -28,18 +28,17 @@ pub static _license: [u8; 4] = *b"GPL\0";
 
 use aya_ebpf::{
     helpers::{
-        bpf_get_current_comm, bpf_get_current_pid_tgid,
-        bpf_get_current_uid_gid, bpf_ktime_get_ns,
-        bpf_probe_read_user_str_bytes, bpf_probe_read_user,
+        bpf_get_current_comm, bpf_get_current_pid_tgid, bpf_get_current_uid_gid, bpf_ktime_get_ns,
+        bpf_probe_read_user, bpf_probe_read_user_str_bytes,
     },
     macros::{map, tracepoint},
     maps::RingBuf,
     programs::TracePointContext,
 };
-use sentinella_common::{ExecEvent, EventType, NetworkEvent};
+use sentinella_common::{EventType, ExecEvent, NetworkEvent};
 
 /// Ring buffer map for delivering events to userspace.
-/// 256 KB — sufficient for bursty execve events.
+/// Full buffers drop events; capacity is not a delivery guarantee.
 #[map]
 static EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
 
@@ -53,7 +52,7 @@ const FILENAME_OFFSET: usize = 16;
 pub fn sentinella_execve(ctx: TracePointContext) -> u32 {
     match try_sentinella_execve(&ctx) {
         Ok(ret) => ret,
-        Err(_) => 0, // Silently succeed on error — never block execve
+        Err(_) => 0, // Return without a telemetry record when capture fails.
     }
 }
 
@@ -62,7 +61,8 @@ fn is_restricted(comm: &[u8; 16]) -> bool {
     (comm[0] == b'n' && comm[1] == b'c' && comm[2] == 0) || // "nc"
     (comm[0] == b'n' && comm[1] == b'c' && comm[2] == b'a' && comm[3] == b't' && comm[4] == 0) || // "ncat"
     (comm[0] == b's' && comm[1] == b'o' && comm[2] == b'c' && comm[3] == b'a' && comm[4] == b't' && comm[5] == 0) || // "socat"
-    (comm[0] == b'n' && comm[1] == b'e' && comm[2] == b't' && comm[3] == b'c' && comm[4] == b'a' && comm[5] == b't' && comm[6] == 0) // "netcat"
+    (comm[0] == b'n' && comm[1] == b'e' && comm[2] == b't' && comm[3] == b'c' && comm[4] == b'a' && comm[5] == b't' && comm[6] == 0)
+    // "netcat"
 }
 
 /// Helper to detect if the executed binary path matches restricted tools
@@ -93,7 +93,11 @@ fn is_restricted_path(path: &[u8; 256]) -> bool {
     if len >= 4 {
         let idx = len - 4;
         if idx < 253 {
-            if path[idx] == b'n' && path[idx + 1] == b'c' && path[idx + 2] == b'a' && path[idx + 3] == b't' {
+            if path[idx] == b'n'
+                && path[idx + 1] == b'c'
+                && path[idx + 2] == b'a'
+                && path[idx + 3] == b't'
+            {
                 if idx == 0 {
                     return true;
                 } else if path[idx - 1] == b'/' {
@@ -107,7 +111,12 @@ fn is_restricted_path(path: &[u8; 256]) -> bool {
     if len >= 5 {
         let idx = len - 5;
         if idx < 252 {
-            if path[idx] == b's' && path[idx + 1] == b'o' && path[idx + 2] == b'c' && path[idx + 3] == b'a' && path[idx + 4] == b't' {
+            if path[idx] == b's'
+                && path[idx + 1] == b'o'
+                && path[idx + 2] == b'c'
+                && path[idx + 3] == b'a'
+                && path[idx + 4] == b't'
+            {
                 if idx == 0 {
                     return true;
                 } else if path[idx - 1] == b'/' {
@@ -121,7 +130,13 @@ fn is_restricted_path(path: &[u8; 256]) -> bool {
     if len >= 6 {
         let idx = len - 6;
         if idx < 251 {
-            if path[idx] == b'n' && path[idx + 1] == b'e' && path[idx + 2] == b't' && path[idx + 3] == b'c' && path[idx + 4] == b'a' && path[idx + 5] == b't' {
+            if path[idx] == b'n'
+                && path[idx + 1] == b'e'
+                && path[idx + 2] == b't'
+                && path[idx + 3] == b'c'
+                && path[idx + 4] == b'a'
+                && path[idx + 5] == b't'
+            {
                 if idx == 0 {
                     return true;
                 } else if path[idx - 1] == b'/' {
@@ -149,23 +164,13 @@ fn try_sentinella_execve(ctx: &TracePointContext) -> Result<u32, i64> {
     let comm = bpf_get_current_comm().map_err(|e| e as i64)?;
 
     // Read the filename pointer from tracepoint context args
-    let filename_ptr: *const u8 = unsafe {
-        ctx.read_at(FILENAME_OFFSET)
-            .map_err(|e| e as i64)?
-    };
+    let filename_ptr: *const u8 = unsafe { ctx.read_at(FILENAME_OFFSET).map_err(|e| e as i64)? };
 
-    // Read the filename string into a stack-allocated buffer.
-    // This is required because BPF copy helpers (like bpf_probe_read_user_str)
-    // are only permitted to write to the BPF stack, not directly to map memory.
+    // Stage the bounded user string before copying it into the ring-buffer entry.
     let mut filename = [0u8; sentinella_common::FILENAME_LEN];
-    let _ = unsafe {
-        bpf_probe_read_user_str_bytes(
-            filename_ptr,
-            &mut filename,
-        )
-    };
+    let _ = unsafe { bpf_probe_read_user_str_bytes(filename_ptr, &mut filename) };
 
-    // ACTIVE ENFORCEMENT: Kill restricted reverse shell commands immediately using SIGKILL (9)
+    // This policy is independent of the desktop mode. Signal failure is not reported.
     if is_restricted(&comm) || is_restricted_path(&filename) {
         unsafe {
             let _ = aya_ebpf::helpers::bpf_send_signal(9);
@@ -184,7 +189,7 @@ fn try_sentinella_execve(ctx: &TracePointContext) -> Result<u32, i64> {
         // Fill fixed fields using volatile writes to ensure direct memory access
         core::ptr::write_volatile(&mut (*event).event_type, EventType::ProcessExec as u32);
         core::ptr::write_volatile(&mut (*event).pid, pid);
-        core::ptr::write_volatile(&mut (*event).ppid, 0); // Phase 2: traverse task_struct->real_parent
+        core::ptr::write_volatile(&mut (*event).ppid, 0); // Parent PID is not collected.
         core::ptr::write_volatile(&mut (*event).uid, uid);
         core::ptr::write_volatile(&mut (*event).timestamp_ns, timestamp_ns);
         core::ptr::write_volatile(&mut (*event).comm, comm);
@@ -212,40 +217,108 @@ pub fn sentinella_memfd_create(ctx: TracePointContext) -> u32 {
 }
 
 fn is_benign_memfd_caller(comm: &[u8; 16]) -> bool {
-    // 1. "pulseaudio" (10 chars): p-u-l-s-e-a-u-d-i-o
-    if comm[0] == b'p' && comm[1] == b'u' && comm[2] == b'l' && comm[3] == b's' && comm[4] == b'e' && comm[5] == b'a' && comm[6] == b'u' && comm[7] == b'd' && comm[8] == b'i' && comm[9] == b'o' {
+    // pulseaudio
+    if comm[0] == b'p'
+        && comm[1] == b'u'
+        && comm[2] == b'l'
+        && comm[3] == b's'
+        && comm[4] == b'e'
+        && comm[5] == b'a'
+        && comm[6] == b'u'
+        && comm[7] == b'd'
+        && comm[8] == b'i'
+        && comm[9] == b'o'
+    {
         return true;
     }
-    // 2. "pipewire" (8 chars): p-i-p-e-w-i-r-e
-    if comm[0] == b'p' && comm[1] == b'i' && comm[2] == b'p' && comm[3] == b'e' && comm[4] == b'w' && comm[5] == b'i' && comm[6] == b'r' && comm[7] == b'e' {
+    // pipewire
+    if comm[0] == b'p'
+        && comm[1] == b'i'
+        && comm[2] == b'p'
+        && comm[3] == b'e'
+        && comm[4] == b'w'
+        && comm[5] == b'i'
+        && comm[6] == b'r'
+        && comm[7] == b'e'
+    {
         return true;
     }
-    // 3. "chrome" (6 chars): c-h-r-o-m-e
-    if comm[0] == b'c' && comm[1] == b'h' && comm[2] == b'r' && comm[3] == b'o' && comm[4] == b'm' && comm[5] == b'e' {
+    // chrome
+    if comm[0] == b'c'
+        && comm[1] == b'h'
+        && comm[2] == b'r'
+        && comm[3] == b'o'
+        && comm[4] == b'm'
+        && comm[5] == b'e'
+    {
         return true;
     }
-    // 4. "chromium" (8 chars): c-h-r-o-m-i-u-m
-    if comm[0] == b'c' && comm[1] == b'h' && comm[2] == b'r' && comm[3] == b'o' && comm[4] == b'm' && comm[5] == b'i' && comm[6] == b'u' && comm[7] == b'm' {
+    // chromium
+    if comm[0] == b'c'
+        && comm[1] == b'h'
+        && comm[2] == b'r'
+        && comm[3] == b'o'
+        && comm[4] == b'm'
+        && comm[5] == b'i'
+        && comm[6] == b'u'
+        && comm[7] == b'm'
+    {
         return true;
     }
-    // 5. "firefox" (7 chars): f-i-r-e-f-o-x
-    if comm[0] == b'f' && comm[1] == b'i' && comm[2] == b'r' && comm[3] == b'e' && comm[4] == b'f' && comm[5] == b'o' && comm[6] == b'x' {
+    // firefox
+    if comm[0] == b'f'
+        && comm[1] == b'i'
+        && comm[2] == b'r'
+        && comm[3] == b'e'
+        && comm[4] == b'f'
+        && comm[5] == b'o'
+        && comm[6] == b'x'
+    {
         return true;
     }
-    // 6. "gnome-shell" (11 chars): g-n-o-m-e---s-h-e-l-l
-    if comm[0] == b'g' && comm[1] == b'n' && comm[2] == b'o' && comm[3] == b'm' && comm[4] == b'e' && comm[5] == b'-' && comm[6] == b's' && comm[7] == b'h' && comm[8] == b'e' && comm[9] == b'l' && comm[10] == b'l' {
+    // gnome-shell
+    if comm[0] == b'g'
+        && comm[1] == b'n'
+        && comm[2] == b'o'
+        && comm[3] == b'm'
+        && comm[4] == b'e'
+        && comm[5] == b'-'
+        && comm[6] == b's'
+        && comm[7] == b'h'
+        && comm[8] == b'e'
+        && comm[9] == b'l'
+        && comm[10] == b'l'
+    {
         return true;
     }
-    // 7. "Xorg" (4 chars): X-o-r-g
+    // Xorg
     if comm[0] == b'X' && comm[1] == b'o' && comm[2] == b'r' && comm[3] == b'g' && comm[4] == 0 {
         return true;
     }
-    // 8. "dbus-daemon" (11 chars): d-b-u-s---d-a-e-m-o-n
-    if comm[0] == b'd' && comm[1] == b'b' && comm[2] == b'u' && comm[3] == b's' && comm[4] == b'-' && comm[5] == b'd' && comm[6] == b'a' && comm[7] == b'e' && comm[8] == b'm' && comm[9] == b'o' && comm[10] == b'n' {
+    // dbus-daemon
+    if comm[0] == b'd'
+        && comm[1] == b'b'
+        && comm[2] == b'u'
+        && comm[3] == b's'
+        && comm[4] == b'-'
+        && comm[5] == b'd'
+        && comm[6] == b'a'
+        && comm[7] == b'e'
+        && comm[8] == b'm'
+        && comm[9] == b'o'
+        && comm[10] == b'n'
+    {
         return true;
     }
-    // 9. "systemd" (7 chars): s-y-s-t-e-m-d
-    if comm[0] == b's' && comm[1] == b'y' && comm[2] == b's' && comm[3] == b't' && comm[4] == b'e' && comm[5] == b'm' && comm[6] == b'd' {
+    // systemd
+    if comm[0] == b's'
+        && comm[1] == b'y'
+        && comm[2] == b's'
+        && comm[3] == b't'
+        && comm[4] == b'e'
+        && comm[5] == b'm'
+        && comm[6] == b'd'
+    {
         return true;
     }
 
@@ -269,18 +342,10 @@ fn try_sentinella_memfd_create(ctx: &TracePointContext) -> Result<u32, i64> {
     }
 
     // Read the name pointer from tracepoint context args (offset 16)
-    let name_ptr: *const u8 = unsafe {
-        ctx.read_at(16)
-            .map_err(|e| e as i64)?
-    };
+    let name_ptr: *const u8 = unsafe { ctx.read_at(16).map_err(|e| e as i64)? };
 
     let mut name = [0u8; sentinella_common::FILENAME_LEN];
-    let _ = unsafe {
-        bpf_probe_read_user_str_bytes(
-            name_ptr,
-            &mut name,
-        )
-    };
+    let _ = unsafe { bpf_probe_read_user_str_bytes(name_ptr, &mut name) };
 
     // --- Reserve ring buffer entry ---
     let mut entry = match EVENTS.reserve::<ExecEvent>(0) {
@@ -339,20 +404,14 @@ fn try_sentinella_connect(ctx: &TracePointContext) -> Result<u32, i64> {
     let comm = bpf_get_current_comm().map_err(|e| e as i64)?;
 
     // Read the uservaddr pointer from tracepoint args at offset 24
-    let uservaddr_ptr: *const sockaddr_in = unsafe {
-        ctx.read_at(24)
-            .map_err(|e| e as i64)?
-    };
+    let uservaddr_ptr: *const sockaddr_in = unsafe { ctx.read_at(24).map_err(|e| e as i64)? };
 
     if uservaddr_ptr.is_null() {
         return Ok(0);
     }
 
     // Safely copy the sockaddr_in structure from user space
-    let sock_addr = unsafe {
-        bpf_probe_read_user(uservaddr_ptr)
-            .map_err(|e| e as i64)?
-    };
+    let sock_addr = unsafe { bpf_probe_read_user(uservaddr_ptr).map_err(|e| e as i64)? };
 
     // We only inspect IPv4 (AF_INET = 2) connections
     if sock_addr.sin_family != 2 {
@@ -387,4 +446,3 @@ fn try_sentinella_connect(ctx: &TracePointContext) -> Result<u32, i64> {
 
     Ok(0)
 }
-

@@ -1,14 +1,9 @@
 //! # MITRE ATT&CK Mapping
 //!
-//! Phase 1 static classification of process executions to MITRE ATT&CK framework.
+//! Static process-name and path classification against MITRE ATT&CK labels.
 //! This is intentionally simple — pattern matching on comm/filename to identify
 //! common execution techniques.
 //!
-//! Phase 2 will add:
-//! - Parent-child chain analysis
-//! - Argument inspection
-//! - Container context
-//! - Behavioral sequence detection
 
 /// A MITRE ATT&CK mapping result.
 #[derive(Debug, Clone)]
@@ -22,8 +17,7 @@ pub struct MitreMapping {
 impl MitreMapping {
     /// Classify a process execution event based on comm name and filename.
     ///
-    /// This is a static heuristic for Phase 1. It checks the process name
-    /// against known patterns to assign the most likely MITRE technique.
+    /// Labels describe name matches, not evidence that an attack occurred.
     pub fn classify(comm: &str, filename: &str) -> Self {
         let comm_lower = comm.to_lowercase();
         let filename_lower = filename.to_lowercase();
@@ -38,7 +32,8 @@ impl MitreMapping {
         }
 
         // T1059.004 — Unix Shell specifically
-        if comm_lower == "sh" || comm_lower == "dash" || comm_lower == "zsh" || comm_lower == "fish" {
+        if comm_lower == "sh" || comm_lower == "dash" || comm_lower == "zsh" || comm_lower == "fish"
+        {
             return MitreMapping {
                 tactic: "Execution",
                 technique: "T1059.004 - Unix Shell",
@@ -63,7 +58,10 @@ impl MitreMapping {
 
         // --- Discovery ---
         // T1082 — System Information Discovery
-        if matches!(comm_lower.as_str(), "uname" | "hostnamectl" | "lsb_release" | "cat" | "dmidecode") {
+        if matches!(
+            comm_lower.as_str(),
+            "uname" | "hostnamectl" | "lsb_release" | "cat" | "dmidecode"
+        ) {
             return MitreMapping {
                 tactic: "Discovery",
                 technique: "T1082 - System Information Discovery",
@@ -71,7 +69,10 @@ impl MitreMapping {
         }
 
         // T1083 — File and Directory Discovery
-        if matches!(comm_lower.as_str(), "ls" | "find" | "locate" | "tree" | "stat" | "file") {
+        if matches!(
+            comm_lower.as_str(),
+            "ls" | "find" | "locate" | "tree" | "stat" | "file"
+        ) {
             return MitreMapping {
                 tactic: "Discovery",
                 technique: "T1083 - File and Directory Discovery",
@@ -79,7 +80,10 @@ impl MitreMapping {
         }
 
         // T1033 — System Owner/User Discovery
-        if matches!(comm_lower.as_str(), "whoami" | "id" | "who" | "w" | "users" | "last" | "finger") {
+        if matches!(
+            comm_lower.as_str(),
+            "whoami" | "id" | "who" | "w" | "users" | "last" | "finger"
+        ) {
             return MitreMapping {
                 tactic: "Discovery",
                 technique: "T1033 - System Owner/User Discovery",
@@ -95,7 +99,10 @@ impl MitreMapping {
         }
 
         // T1057 — Process Discovery
-        if matches!(comm_lower.as_str(), "ps" | "top" | "htop" | "pgrep" | "pidof") {
+        if matches!(
+            comm_lower.as_str(),
+            "ps" | "top" | "htop" | "pgrep" | "pidof"
+        ) {
             return MitreMapping {
                 tactic: "Discovery",
                 technique: "T1057 - Process Discovery",

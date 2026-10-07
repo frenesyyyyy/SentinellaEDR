@@ -1,14 +1,12 @@
 //! # eBPF Loader
 //!
-//! Loads the embedded eBPF object, attaches to the `syscalls:sys_enter_execve`
+//! Loads a caller-supplied eBPF object, attaches to `syscalls:sys_enter_execve`,
 //! tracepoint, and reads events from the ring buffer.
 //!
-//! The loader is designed to be called from both:
-//! - Tauri backend (via sentinella-tauri commands)
-//! - Standalone daemon mode (future sentinella-agent)
+//! This exec-only path is separate from the desktop's multi-event reader.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use aya::maps::RingBuf;
@@ -18,8 +16,8 @@ use log::{error, info, warn};
 use tokio::io::unix::AsyncFd;
 use tokio::sync::mpsc;
 
-use sentinella_common::ExecEvent;
 use crate::events::ProcessExecEvent;
+use sentinella_common::ExecEvent;
 
 /// Sensor handle returned after starting the eBPF sensor.
 pub struct SensorHandle {
@@ -60,10 +58,9 @@ pub async fn start_sensor(
 ) -> Result<SensorHandle> {
     info!("Loading Sentinella eBPF program...");
 
-    // Load the eBPF object
     let mut ebpf = Ebpf::load(ebpf_bytes).context(
         "Failed to load eBPF program. Ensure you have root privileges or \
-         CAP_BPF + CAP_PERFMON capabilities, and kernel >= 5.8."
+         CAP_BPF + CAP_PERFMON capabilities, and kernel >= 5.8.",
     )?;
 
     // Initialize aya-log (maps eBPF log messages to Rust log crate)
@@ -82,26 +79,23 @@ pub async fn start_sensor(
         .load()
         .context("Failed to load tracepoint program into kernel")?;
 
-    program
-        .attach("syscalls", "sys_enter_execve")
-        .context(
-            "Failed to attach to tracepoint syscalls:sys_enter_execve. \
+    program.attach("syscalls", "sys_enter_execve").context(
+        "Failed to attach to tracepoint syscalls:sys_enter_execve. \
              Ensure the tracepoint exists: \
-             cat /sys/kernel/debug/tracing/events/syscalls/sys_enter_execve/format"
-        )?;
+             cat /sys/kernel/debug/tracing/events/syscalls/sys_enter_execve/format",
+    )?;
 
     info!("eBPF tracepoint attached: syscalls:sys_enter_execve");
 
-    // Get the ring buffer map
     let ring_buf = RingBuf::try_from(
         ebpf.take_map("EVENTS")
-            .context("Map 'EVENTS' not found in eBPF object")?
-    ).context("Failed to create RingBuf from EVENTS map")?;
+            .context("Map 'EVENTS' not found in eBPF object")?,
+    )
+    .context("Failed to create RingBuf from EVENTS map")?;
 
     let running = Arc::new(AtomicBool::new(true));
     let running_clone = running.clone();
 
-    // Spawn the event processing loop
     let task = tokio::task::spawn(async move {
         if let Err(e) = event_loop(ring_buf, event_tx, running_clone, ebpf).await {
             error!("Sensor event loop error: {}", e);
@@ -123,18 +117,17 @@ async fn event_loop(
     running: Arc<AtomicBool>,
     _ebpf: Ebpf, // Keep alive — dropping detaches programs
 ) -> Result<()> {
-    // Wrap the RingBuf in AsyncFd for async I/O
-    let mut async_fd = AsyncFd::new(ring_buf)
-        .context("Failed to create AsyncFd for ring buffer")?;
+    let mut async_fd =
+        AsyncFd::new(ring_buf).context("Failed to create AsyncFd for ring buffer")?;
 
     info!("Sentinella event loop started. Waiting for execve events...");
 
     while running.load(Ordering::Relaxed) {
-        // Wait for the ring buffer fd to become readable
-        let mut guard = async_fd.readable_mut().await
+        let mut guard = async_fd
+            .readable_mut()
+            .await
             .context("Error waiting for ring buffer readability")?;
 
-        // Drain all available events from the ring buffer
         let rb = guard.get_inner_mut();
         while let Some(item) = rb.next() {
             let data = item.as_ref();
@@ -150,9 +143,8 @@ async fn event_loop(
 
             // Safety: ExecEvent is #[repr(C)] with fixed-size fields,
             // and we verified the buffer is large enough.
-            let raw_event: ExecEvent = unsafe {
-                std::ptr::read_unaligned(data.as_ptr() as *const ExecEvent)
-            };
+            let raw_event: ExecEvent =
+                unsafe { std::ptr::read_unaligned(data.as_ptr() as *const ExecEvent) };
 
             let processed = ProcessExecEvent::from_exec_event(&raw_event);
 
