@@ -31,7 +31,7 @@ export default function App() {
     }
   };
 
-  // Loading simulator & privilege validation
+  // The splash delay is visual; the privilege check determines sensor access.
   useEffect(() => {
     let progress = 0;
     const interval = setInterval(async () => {
@@ -108,7 +108,7 @@ export default function App() {
       setScannedCount(count);
     }).then((u) => unlisteners.push(u));
 
-    // Throttling: batch commit pending events every 500ms to eliminate UI thrashing
+    // Batch state updates so each incoming event does not trigger a render.
     const throttleInterval = setInterval(() => {
       if (pendingEvents.length > 0) {
         const chunk = [...pendingEvents];

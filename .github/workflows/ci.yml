@@ -40,7 +40,7 @@ jobs:
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm libelf-dev libssl-dev pkg-config \
+          sudo apt-get install -y clang llvm libelf-dev libssl-dev pkg-config curl zstd \
             libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
       - name: Install Rust toolchains
         run: |

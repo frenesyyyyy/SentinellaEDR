@@ -6,8 +6,7 @@
 //! This compiles the sentinella-ebpf crate for the `bpfel-unknown-none` target
 //! using the nightly toolchain, and places the output in `target/bpfel-unknown-none/`.
 //!
-//! The userspace crate (sentinella-core) then embeds the compiled eBPF object
-//! via `include_bytes_aligned!`.
+//! The desktop binary embeds the compiled object with `include_bytes!`.
 
 use std::path::PathBuf;
 use std::process::Command;

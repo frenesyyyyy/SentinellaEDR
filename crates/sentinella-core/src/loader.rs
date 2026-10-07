@@ -1,11 +1,9 @@
 //! # eBPF Loader
 //!
-//! Loads the embedded eBPF object, attaches to the `syscalls:sys_enter_execve`
+//! Loads a caller-supplied eBPF object, attaches to `syscalls:sys_enter_execve`,
 //! tracepoint, and reads events from the ring buffer.
 //!
-//! The loader is designed to be called from both:
-//! - Tauri backend (via sentinella-tauri commands)
-//! - Standalone daemon mode (future sentinella-agent)
+//! This exec-only path is separate from the desktop's multi-event reader.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;

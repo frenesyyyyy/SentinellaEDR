@@ -8,7 +8,7 @@ For Debian/Ubuntu, the build also needs Clang/LLVM and libelf:
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y build-essential pkg-config clang llvm libelf-dev \
+sudo apt-get install -y build-essential pkg-config clang llvm libelf-dev curl zstd \
   libssl-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
   librsvg2-dev libxdo-dev patchelf
 rustup toolchain install stable --component rustfmt --component clippy
