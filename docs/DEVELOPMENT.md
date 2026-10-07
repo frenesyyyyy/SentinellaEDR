@@ -13,7 +13,7 @@ sudo apt-get install -y build-essential pkg-config clang llvm libelf-dev \
   librsvg2-dev libxdo-dev patchelf
 rustup toolchain install stable --component rustfmt --component clippy
 rustup toolchain install nightly-2026-05-20 --component rust-src --profile minimal
-cargo install bpf-linker --locked
+bash scripts/install-bpf-linker.sh
 cargo xtask build-ebpf
 cd apps/desktop
 npm ci
@@ -24,6 +24,11 @@ cd ../..
 `xtask` places the object under `target/bpfel-unknown-none/debug/`. The desktop
 embeds that file at compile time. For a release build, build the eBPF object with
 `cargo xtask build-ebpf --release` first.
+
+The installer downloads a version-pinned Linux x86_64 release of
+[bpf-linker](https://github.com/aya-rs/bpf-linker#installation) and checks its SHA-256.
+It needs `curl`, `zstd` and `tar`, and installs under `~/.cargo/bin` (on PATH with
+a standard rustup setup). This avoids depending on the runner's system LLVM ABI.
 
 ## Checks
 
