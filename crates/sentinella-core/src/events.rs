@@ -4,8 +4,8 @@
 //! with MITRE ATT&CK annotations.
 
 use chrono::Utc;
-use serde::Serialize;
 use sentinella_common::{bytes_to_str, ExecEvent};
+use serde::Serialize;
 
 use crate::mitre::MitreMapping;
 
@@ -39,13 +39,9 @@ impl ProcessExecEvent {
         let comm = bytes_to_str(&raw.comm).to_string();
         let filename = bytes_to_str(&raw.filename).to_string();
 
-        // Map to MITRE ATT&CK
         let mapping = MitreMapping::classify(&comm, &filename);
 
-        // Convert kernel monotonic ns to wall clock time
-        // Note: bpf_ktime_get_ns is monotonic, not wall clock.
-        // For Phase 1 we use current wall time as approximation.
-        // Phase 2 will correlate monotonic with boot time for accuracy.
+        // Record receipt time; the kernel timestamp uses a different, monotonic clock.
         let timestamp = Utc::now();
 
         ProcessExecEvent {

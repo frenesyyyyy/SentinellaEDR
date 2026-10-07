@@ -1,6 +1,6 @@
-use std::fs;
-use aya::Ebpf;
 use aya::programs::TracePoint;
+use aya::Ebpf;
+use std::fs;
 
 fn test_load(path: &str) {
     println!("\n========================================");
@@ -37,7 +37,7 @@ fn test_load(path: &str) {
 
     for name in &program_names {
         println!("Attempting to load '{}'...", name);
-        
+
         // With section names, program name might have syscalls/ prefix
         let actual_name = if ebpf.program(&format!("syscalls/{}", name)).is_some() {
             format!("syscalls/{}", name)
@@ -49,12 +49,10 @@ fn test_load(path: &str) {
             Some(prog) => {
                 let tp: Result<&mut TracePoint, _> = prog.try_into();
                 match tp {
-                    Ok(tp) => {
-                        match tp.load() {
-                            Ok(()) => println!("  SUCCESS: loaded '{}'", name),
-                            Err(e) => println!("  FAILED: loaded '{}': {}", name, e),
-                        }
-                    }
+                    Ok(tp) => match tp.load() {
+                        Ok(()) => println!("  SUCCESS: loaded '{}'", name),
+                        Err(e) => println!("  FAILED: loaded '{}': {}", name, e),
+                    },
                     Err(e) => println!("  FAILED: program '{}' is not a TracePoint: {}", name, e),
                 }
             }

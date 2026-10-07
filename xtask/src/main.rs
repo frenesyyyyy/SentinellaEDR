@@ -9,8 +9,8 @@
 //! The userspace crate (sentinella-core) then embeds the compiled eBPF object
 //! via `include_bytes_aligned!`.
 
-use std::process::Command;
 use std::path::PathBuf;
+use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
@@ -104,8 +104,8 @@ fn workspace_root() -> Result<PathBuf> {
         bail!("cargo locate-project failed");
     }
 
-    let path = String::from_utf8(output.stdout)
-        .context("Invalid UTF-8 in cargo locate-project output")?;
+    let path =
+        String::from_utf8(output.stdout).context("Invalid UTF-8 in cargo locate-project output")?;
     let path = PathBuf::from(path.trim());
 
     // locate-project returns the Cargo.toml path; we want the directory

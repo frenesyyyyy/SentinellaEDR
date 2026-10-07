@@ -22,7 +22,7 @@ export interface ProcessExecEvent {
   mitre_technique: string;
 }
 
-/** Process telemetry event from Phase 5 IPC */
+/** Payload carried by the sensor-telemetry event */
 export interface ProcessEvent {
   timestamp: string;
   pid: number;
@@ -30,7 +30,7 @@ export interface ProcessEvent {
   event_type: string;
   details: string;
   enforcement: string;
-  /** Phase 8: Number of aggregated duplicate events (undefined or 1 = single event) */
+  /** Number of aggregated events (undefined or 1 = single event) */
   count?: number;
 }
 
